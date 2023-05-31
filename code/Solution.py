@@ -8,34 +8,8 @@ from Business.Disk import Disk
 from psycopg2 import sql
 
 # ************************************** our auxiliary functions start **************************************
-# generically add tuple to table
-def add(query) -> ReturnValue:
-    result = ReturnValue.OK
-    conn = None
-    try:
-        conn = Connector.DBConnector()
-        conn.execute(query)
-        conn.commit()
-    except (DatabaseException.CHECK_VIOLATION,
-            DatabaseException.NOT_NULL_VIOLATION,
-            DatabaseException.FOREIGN_KEY_VIOLATION) as e:
-        result = ReturnValue.BAD_PARAMS
-    except DatabaseException.UNIQUE_VIOLATION as e:
-        result = ReturnValue.ALREADY_EXISTS
-    except (DatabaseException.ConnectionInvalid,
-            DatabaseException.database_ini_ERROR,
-            DatabaseException.UNKNOWN_ERROR,
-            Exception) as e:
-        result = ReturnValue.ERROR
-    finally:
-        # will happen any way after try termination or exception handling
-        conn.close()
-        return result
-# ************************************** our auxiliary functions end **************************************
-
-# ************************************** Database functions start **************************************
-def createTables():
-    base_tables = """
+def create_base_tables():
+    return """
         CREATE TABLE IF NOT EXISTS "Photo"
             (
                 id integer NOT NULL PRIMARY KEY CHECK (id > 0),
@@ -57,33 +31,80 @@ def createTables():
                 company TEXT NOT NULL
             );
     """
-    new_tables = """
-    
+def create_new_tables():
+    return """
     """
-    views = """
-    
+def create_view_tables():
+    return """
     """
-
-    query = base_tables + new_tables + views
-
+# generically add tuple to table
+def add(query) -> ReturnValue:
+    result = ReturnValue.OK
     conn = None
     try:
-        # breakpoint()
         conn = Connector.DBConnector()
         conn.execute(query)
         conn.commit()
+    except (DatabaseException.CHECK_VIOLATION,
+            DatabaseException.NOT_NULL_VIOLATION,
+            DatabaseException.FOREIGN_KEY_VIOLATION) as e:
+        result = ReturnValue.BAD_PARAMS
+    except DatabaseException.UNIQUE_VIOLATION as e:
+        result = ReturnValue.ALREADY_EXISTS
+    except (DatabaseException.ConnectionInvalid,
+            DatabaseException.database_ini_ERROR,
+            DatabaseException.UNKNOWN_ERROR,
+            Exception) as e:
+        result = ReturnValue.ERROR
     finally:
-        # will happen any way after try termination or exception handling
+        conn.close()
+        return result
+# ************************************** our auxiliary functions end **************************************
+
+# ************************************** Database functions start **************************************
+def createTables():
+    base_tables = create_base_tables()
+    new_tables = create_new_tables()
+    views = create_view_tables()
+    query = base_tables + new_tables + views
+    conn = None
+    try:
+        conn = Connector.DBConnector()
+        conn.execute(query)
+        conn.commit()
+    except Exception as e:
+        pass
+    finally:
+        conn.close()
+
+def clearTables():
+    base_tables = ["Photo", "Disk", "Ram"]
+    queries = ['DELETE FROM "{}";'.format(table) for table in base_tables]
+    query = "\n".join(queries)
+    conn = None
+    try:
+        conn = Connector.DBConnector()
+        conn.execute(query)
+        conn.commit()
+    except Exception as e:
+        pass
+    finally:
         conn.close()
 
 
-
-def clearTables():
-    pass
-
-
 def dropTables():
-    pass
+    base_tables = ["Photo", "Disk", "Ram"]
+    queries = ['DROP TABLE IF EXISTS "{}";'.format(table) for table in base_tables]
+    query = "\n".join(queries)
+    conn = None
+    try:
+        conn = Connector.DBConnector()
+        conn.execute(query)
+        conn.commit()
+    except Exception as e:
+        pass
+    finally:
+        conn.close()
 
 # ************************************** Database functions end **************************************
 
@@ -113,7 +134,9 @@ def getPhotoByID(photoID: int) -> Photo:
         row_effected, entries = conn.execute(query)
         if row_effected == 1:
             photo_id, description, size = entries[0].values()
-            result = Photo(photo_id, description, size)
+            result.setPhotoID(photo_id)
+            result.setDescription(description)
+            result.setSize(size)
     except Exception as e:
         pass
     finally:
@@ -124,6 +147,9 @@ def getPhotoByID(photoID: int) -> Photo:
 # createTables()
 # addPhoto(Photo(1, "Tree", 10))
 # print(getPhotoByID(1).__str__())
+# clearTables()
+# dropTables()
+createTables()
 def deletePhoto(photo: Photo) -> ReturnValue:
     return ReturnValue.OK
 
