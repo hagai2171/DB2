@@ -9,7 +9,29 @@ from psycopg2 import sql
 
 
 def createTables():
-    pass
+    base_tables = """"
+        CREATE TABLE IF NOT EXISTS "Photo"
+            (
+                id integer NOT NULL PRIMARY KEY CHECK (id > 0),
+                description TEXT NOT NULL,
+                disk_free_space_needed integer NOT NULL CHECK (disk_free_space_needed >= 0)
+            );
+        CREATE TABLE IF NOT EXISTS "Disk"
+            (
+                id integer NOT NULL PRIMARY KEY CHECK (id > 0),
+                manufacturing_company TEXT NOT NULL,
+                speed integer NOT NULL CHECK (speed > 0),
+                free_space integer NOT NULL CHECK (disk_free_space_needed >= 0),
+                cost_per_byte integer NOT NULL CHECK (cost_per_byte > 0)
+            );
+         CREATE TABLE IF NOT EXISTS "Ram"
+            (
+                id integer NOT NULL PRIMARY KEY CHECK (id > 0),
+                size integer NOT NULL CHECK (size > 0),
+                company TEXT NOT NULL
+            );
+    """
+
 
 
 def clearTables():
