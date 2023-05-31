@@ -31,6 +31,35 @@ def createTables():
                 company TEXT NOT NULL
             );
     """
+    new_tables = """
+    
+    """
+    views = """
+    
+    """
+
+    query = base_tables + new_tables + views
+
+    conn = None
+    try:
+        conn = Connector.DBConnector()
+        conn.execute(query )
+        conn.commit()
+    except DatabaseException.ConnectionInvalid as e:
+        print(e)
+    except DatabaseException.NOT_NULL_VIOLATION as e:
+        print(e)
+    except DatabaseException.CHECK_VIOLATION as e:
+        print(e)
+    except DatabaseException.UNIQUE_VIOLATION as e:
+        print(e)
+    except DatabaseException.FOREIGN_KEY_VIOLATION as e:
+        print(e)
+    except Exception as e:
+        print(e)
+    finally:
+        # will happen any way after try termination or exception handling
+        conn.close()
 
 
 
