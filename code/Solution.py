@@ -32,16 +32,21 @@ def create_base_tables():
             );
     """
 def create_new_tables():
+    return create_photo_in_disk_table()
+
+
+def create_photo_in_disk_table():
     return """
-            CREATE TABLE IF NOT EXISTS "PhotoInDisk"
-		(
-			photo_id integer NOT NULL,
-			disk_id integer NOT NULL,
-			PRIMARY KEY (photo_id, disk_id),
-			FOREIGN KEY (photo_id) REFERENCES "Photo" (id) ON DELETE CASCADE
-			FOREIGN KEY (disk_id) REFERENCES "Disk" (id) ON DELETE CASCADE,
-		);
+        CREATE TABLE IF NOT EXISTS "PhotoInDisk"
+    		(
+    			photo_id integer NOT NULL,
+    			disk_id integer NOT NULL,
+    			PRIMARY KEY (photo_id, disk_id),
+    			FOREIGN KEY (photo_id) REFERENCES "Photo" (id) ON DELETE CASCADE,
+    			FOREIGN KEY (disk_id) REFERENCES "Disk" (id) ON DELETE CASCADE
+    		);
     """
+
 def create_view_tables():
     return """
     """
@@ -105,7 +110,8 @@ def createTables():
 
 def clearTables():
     base_tables = ["Photo", "Disk", "Ram"]
-    queries = ['DELETE FROM "{}";'.format(table) for table in base_tables]
+    new_tables = ["PhotoInDisk"]
+    queries = ['DELETE FROM "{table}";'.format(table=table) for table in base_tables + new_tables]
     query = "\n".join(queries)
     conn = None
     try:
@@ -120,7 +126,8 @@ def clearTables():
 
 def dropTables():
     base_tables = ["Photo", "Disk", "Ram"]
-    queries = ['DROP TABLE IF EXISTS "{}";'.format(table) for table in base_tables]
+    new_tables = ["PhotoInDisk"]
+    queries = ['DROP TABLE IF EXISTS "{table}" CASCADE;'.format(table=table) for table in base_tables + new_tables]
     query = "\n".join(queries)
     conn = None
     try:
@@ -187,9 +194,12 @@ def deletePhoto(photo: Photo) -> ReturnValue:
 # print(getPhotoByID(1).__str__())
 # clearTables()
 # dropTables()
-createTables()
-addPhoto(Photo(1, "Tree", 10))
-print(getPhotoByID(1).__str__())
+# createTables()
+# addPhoto(Photo(1, "Tree", 10))
+# clearTables()
+# dropTables()
+# addPhoto(Photo(1, "Tree", 10))
+# print(getPhotoByID(1).__str__())
 # deletePhoto(Photo(1, "Tree", 10))
 
 def addDisk(disk: Disk) -> ReturnValue:
