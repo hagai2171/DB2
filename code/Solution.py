@@ -33,6 +33,14 @@ def create_base_tables():
     """
 def create_new_tables():
     return """
+            CREATE TABLE IF NOT EXISTS "PhotoInDisk"
+		(
+			photo_id integer NOT NULL,
+			disk_id integer NOT NULL,
+			PRIMARY KEY (photo_id, disk_id),
+			FOREIGN KEY (photo_id) REFERENCES "Photo" (id) ON DELETE CASCADE
+			FOREIGN KEY (disk_id) REFERENCES "Disk" (id) ON DELETE CASCADE,
+		);
     """
 def create_view_tables():
     return """
@@ -59,6 +67,24 @@ def add(query) -> ReturnValue:
     finally:
         conn.close()
         return result
+
+# generically delete tuple from table
+def delete(query):
+    result = ReturnValue.OK
+    conn = None
+    try:
+        conn = Connector.DBConnector()
+        conn.execute(query)
+        row_effected, entries = conn.execute(query)
+        if row_effected != 0:
+            conn.commit()
+    except Exception as e:
+        result = ReturnValue.ERROR
+    finally:
+        conn.close()
+        return result
+
+
 # ************************************** our auxiliary functions end **************************************
 
 # ************************************** Database functions start **************************************
@@ -143,16 +169,27 @@ def getPhotoByID(photoID: int) -> Photo:
         conn.close()
         return result
 
-
+def deletePhoto(photo: Photo) -> ReturnValue:
+    query = sql.SQL(
+        """"
+        UPDATE "Disk" SET free_space = free_space + {photo_size} WHERE id IN
+            (SELECT PhotoInDisk.Disk_id FROM 
+                ((SELECT id FROM "Photo" WHERE id = {id_to_del}) AS Photo_to_del)
+                INNER JOIN
+                PhotoInDisk ON Photo_to_del.id == PhotoInDisk.photo_id);         
+        DELETE FROM "Photo" where id = {id_to_del};
+        """).format(
+        photo_size = sql.Literal(photo.getSize()),
+        id_to_del=sql.Literal(photo.getPhotoID()))
+    return delete(query)
 # createTables()
 # addPhoto(Photo(1, "Tree", 10))
 # print(getPhotoByID(1).__str__())
 # clearTables()
 # dropTables()
 createTables()
-def deletePhoto(photo: Photo) -> ReturnValue:
-    return ReturnValue.OK
-
+addPhoto(Photo(1, "Tree", 10))
+deletePhoto(Photo(1, "Tree", 10))
 
 def addDisk(disk: Disk) -> ReturnValue:
     return ReturnValue.OK
@@ -177,14 +214,24 @@ def getRAMByID(ramID: int) -> RAM:
 def deleteRAM(ramID: int) -> ReturnValue:
     return ReturnValue.OK
 
+def addDiskAndPhoto(disk: Disk, photo: Photo) -> ReturnValue:
+
+    return ReturnValue.OK
 # ************************************** CRUD API functions end **************************************
 
 # ************************************** BASIC API functions start **************************************
-def addDiskAndPhoto(disk: Disk, photo: Photo) -> ReturnValue:
-    return ReturnValue.OK
-
 
 def addPhotoToDisk(photo: Photo, diskID: int) -> ReturnValue:
+    # The photo with photo.ID is now saved on disk with diskID only if the photo's size is
+    # not larger than the free space on disk.
+    # Input: The photo that needs to be saved on disk with diskID.
+    # Output: ReturnValue with the following conditions:
+    # * OK in case of success.
+    # * NOT_EXISTS if photo/disk does not exist.
+    # * ALREADY_EXISTS if the photo is already saved on the disk.
+    # * BAD_PARAMS in case the photo's size is larger than the free space on the disk.
+    # * ERROR in case of a database error.
+    # Note: do not forget to adjust the free space on the disk.
     return ReturnValue.OK
 
 
