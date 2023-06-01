@@ -189,7 +189,8 @@ def deletePhoto(photo: Photo) -> ReturnValue:
 # dropTables()
 createTables()
 addPhoto(Photo(1, "Tree", 10))
-deletePhoto(Photo(1, "Tree", 10))
+print(getPhotoByID(1).__str__())
+# deletePhoto(Photo(1, "Tree", 10))
 
 def addDisk(disk: Disk) -> ReturnValue:
     return ReturnValue.OK
