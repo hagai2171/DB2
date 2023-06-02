@@ -7,6 +7,7 @@ from Business.RAM import RAM
 from Business.Disk import Disk
 from psycopg2 import sql
 
+
 # ************************************** our auxiliary functions start **************************************
 def create_base_tables():
     return """
@@ -24,13 +25,15 @@ def create_base_tables():
                 free_space integer NOT NULL CHECK (free_space >= 0),
                 cost_per_byte integer NOT NULL CHECK (cost_per_byte > 0)
             );
-         CREATE TABLE IF NOT EXISTS "Ram"
+         CREATE TABLE IF NOT EXISTS "RAM"
             (
                 id integer NOT NULL PRIMARY KEY CHECK (id > 0),
                 size integer NOT NULL CHECK (size > 0),
                 company TEXT NOT NULL
             );
     """
+
+
 def create_new_tables():
     return create_photo_in_disk_table()
 
@@ -47,9 +50,12 @@ def create_photo_in_disk_table():
     		);
     """
 
+
 def create_view_tables():
     return """
     """
+
+
 # generically add tuple to table
 def add(query) -> ReturnValue:
     result = ReturnValue.OK
@@ -72,6 +78,7 @@ def add(query) -> ReturnValue:
     finally:
         conn.close()
         return result
+
 
 # generically delete tuple from table
 def delete(query):
@@ -108,8 +115,9 @@ def createTables():
     finally:
         conn.close()
 
+
 def clearTables():
-    base_tables = ["Photo", "Disk", "Ram"]
+    base_tables = ["Photo", "Disk", "RAM"]
     new_tables = ["PhotoInDisk"]
     queries = ['DELETE FROM "{table}";'.format(table=table) for table in base_tables + new_tables]
     query = "\n".join(queries)
@@ -125,7 +133,7 @@ def clearTables():
 
 
 def dropTables():
-    base_tables = ["Photo", "Disk", "Ram"]
+    base_tables = ["Photo", "Disk", "RAM"]
     new_tables = ["PhotoInDisk"]
     queries = ['DROP TABLE IF EXISTS "{table}" CASCADE;'.format(table=table) for table in base_tables + new_tables]
     query = "\n".join(queries)
@@ -138,6 +146,7 @@ def dropTables():
         pass
     finally:
         conn.close()
+
 
 # ************************************** Database functions end **************************************
 
@@ -175,6 +184,7 @@ def getPhotoByID(photoID: int) -> Photo:
     finally:
         conn.close()
         return result
+
 
 def deletePhoto(photo: Photo) -> ReturnValue:
     query = sql.SQL(
@@ -215,19 +225,65 @@ def deleteDisk(diskID: int) -> ReturnValue:
 
 
 def addRAM(ram: RAM) -> ReturnValue:
-    return ReturnValue.OK
+    query = sql.SQL('INSERT INTO "RAM" VALUES ({ram_id}, {size}, {company})').format(
+        ram_id=sql.Literal(ram.getRamID()),
+        size=sql.Literal(ram.getSize()),
+        company=sql.Literal(ram.getCompany())
+    )
+    return add(query)
 
 
 def getRAMByID(ramID: int) -> RAM:
-    return RAM()
+    result = RAM.badRAM()
+    query = sql.SQL('SELECT * FROM "RAM" WHERE id = {id} ').format(id=sql.Literal(ramID))
+    conn = None
+    try:
+        conn = Connector.DBConnector()
+        row_effected, entries = conn.execute(query)
+        if row_effected == 1:
+            ram_id, size, company = entries[0].values()
+            result.setRamID(ram_id)
+            result.setCompany(company)
+            result.setSize(size)
+    except Exception as e:
+        pass
+    finally:
+        conn.close()
+        return result
 
 
 def deleteRAM(ramID: int) -> ReturnValue:
+    query = sql.SQL(
+        'DELETE FROM "Ram" where id = {id}').format(
+        id=sql.Literal(ramID))
+    conn = None
+    try:
+        conn = Connector.DBConnector()
+        rows_effected, _ = conn.execute(query)
+        if rows_effected == 0:
+            return ReturnValue.NOT_EXISTS
+        conn.commit()
+    except DatabaseException.ConnectionInvalid as e:
+        return ReturnValue.ERROR
+    except Exception as e:
+        return ReturnValue.ERROR
+    finally:
+        conn.close()
+
     return ReturnValue.OK
+
+addRAM(RAM(1, 10, "Intel"))
+addPhoto(Photo(1, "Tree", 10))
+addPhoto(Photo(2, "Tree", 10))
+print(getPhotoByID(1).__str__())
+print(getRAMByID(1).__str__())
+clearTables()
+dropTables()
 
 def addDiskAndPhoto(disk: Disk, photo: Photo) -> ReturnValue:
-
     return ReturnValue.OK
+
+
 # ************************************** CRUD API functions end **************************************
 
 # ************************************** BASIC API functions start **************************************
@@ -282,12 +338,13 @@ def isCompanyExclusive(diskID: int) -> bool:
     return True
 
 
-def isDiskContainingAtLeastNumExists(description : str, num : int) -> bool:
+def isDiskContainingAtLeastNumExists(description: str, num: int) -> bool:
     return True
 
 
 def getDisksContainingTheMostData() -> List[int]:
     return []
+
 
 # ************************************** BASIC API functions end **************************************
 
