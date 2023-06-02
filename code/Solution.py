@@ -58,31 +58,31 @@ def add(query) -> ReturnValue:
         conn = Connector.DBConnector()
         conn.execute(query)
         conn.commit()
-    except (DatabaseException.CHECK_VIOLATION,
-            DatabaseException.NOT_NULL_VIOLATION,
-            DatabaseException.FOREIGN_KEY_VIOLATION) as e:
+    except (DatabaseException.CHECK_VIOLATION, DatabaseException.NOT_NULL_VIOLATION):
         result = ReturnValue.BAD_PARAMS
-    except DatabaseException.UNIQUE_VIOLATION as e:
+    except DatabaseException.FOREIGN_KEY_VIOLATION:
+        result = ReturnValue.NOT_EXISTS
+    except DatabaseException.UNIQUE_VIOLATION:
         result = ReturnValue.ALREADY_EXISTS
-    except (DatabaseException.ConnectionInvalid,
-            DatabaseException.database_ini_ERROR,
-            DatabaseException.UNKNOWN_ERROR,
-            Exception) as e:
+    except Exception:
         result = ReturnValue.ERROR
     finally:
         conn.close()
         return result
 
+
 # generically delete tuple from table
-def delete(query):
+def delete(query, is_disk=False):
     result = ReturnValue.OK
     conn = None
     try:
         conn = Connector.DBConnector()
-        conn.execute(query)
         row_effected, entries = conn.execute(query)
         if row_effected != 0:
             conn.commit()
+        else:
+            if is_disk:
+                result = ReturnValue.NOT_EXISTS
     except Exception as e:
         result = ReturnValue.ERROR
     finally:
@@ -155,10 +155,6 @@ def addPhoto(photo: Photo) -> ReturnValue:
 
 
 def getPhotoByID(photoID: int) -> Photo:
-    # Photo getPhotoByID(Int photoID)
-    # Returns the photo object of photoID.
-    # Input: Photo ID.
-    # Output: The photo object in case the photo exists. BadPhoto() otherwise
     result = Photo.badPhoto()
     query = sql.SQL('SELECT * FROM "Photo" WHERE id = {id} ').format(id=sql.Literal(photoID))
     conn = None
@@ -179,40 +175,53 @@ def getPhotoByID(photoID: int) -> Photo:
 def deletePhoto(photo: Photo) -> ReturnValue:
     query = sql.SQL(
         """"
-        UPDATE "Disk" SET free_space = free_space + {photo_size} WHERE id IN
-            (SELECT PhotoInDisk.Disk_id FROM 
-                ((SELECT id FROM "Photo" WHERE id = {id_to_del}) AS Photo_to_del)
-                INNER JOIN
-                PhotoInDisk ON Photo_to_del.id == PhotoInDisk.photo_id);         
-        DELETE FROM "Photo" where id = {id_to_del};
+        UPDATE "Disk" SET free_space = free_space + {size} WHERE id IN
+            (SELECT "PhotoInDisk".Disk_id FROM 
+                "PhotoInDisk" INNER JOIN "Photo" ON "Photo".id = "PhotoInDisk".photo_id 
+                WHERE ("Photo".id, "Photo".description, "Photo".size) = ({id}, {description}, {size});        
+        DELETE FROM "Photo" WHERE (id, description, size) = ({id}, {description}, {size});
         """).format(
-        photo_size = sql.Literal(photo.getSize()),
-        id_to_del=sql.Literal(photo.getPhotoID()))
+        id=sql.Literal(photo.getPhotoID()),
+        description=sql.Literal(photo.getDescription()),
+        size=sql.Literal(photo.getSize()))
     return delete(query)
-# createTables()
-# addPhoto(Photo(1, "Tree", 10))
-# print(getPhotoByID(1).__str__())
-# clearTables()
-# dropTables()
-# createTables()
-# addPhoto(Photo(1, "Tree", 10))
-# clearTables()
-# dropTables()
-# addPhoto(Photo(1, "Tree", 10))
-# print(getPhotoByID(1).__str__())
-# deletePhoto(Photo(1, "Tree", 10))
+
 
 def addDisk(disk: Disk) -> ReturnValue:
-    return ReturnValue.OK
+    query = sql.SQL('INSERT INTO "Disk" VALUES ({disk_id}, {manufacturing_company}, {speed}, {free_space}, {cost_per_byte});').format(
+        disk_id=sql.Literal(disk.getDiskID()),
+        manufacturing_company=sql.Literal(disk.getCompany()),
+        speed=sql.Literal(disk.getSpeed()),
+        free_space=sql.Literal(disk.getFreeSpace()),
+        cost_per_byte=sql.Literal(disk.getCost())
+    )
+    return add(query)
 
 
 def getDiskByID(diskID: int) -> Disk:
-    return Disk()
+    result = Disk.badDisk()
+    query = sql.SQL('SELECT * FROM "Disk" WHERE id = {id} ').format(id=sql.Literal(diskID))
+    conn = None
+    try:
+        conn = Connector.DBConnector()
+        row_effected, entries = conn.execute(query)
+        if row_effected == 1:
+            disk_id, manufacturing_company, speed, free_space, cost_per_byte = entries[0].values()
+            result.setDiskID(disk_id)
+            result.setCompany(manufacturing_company)
+            result.setSpeed(speed)
+            result.setFreeSpace(free_space)
+            result.setCost(cost_per_byte)
+    except Exception as e:
+        pass
+    finally:
+        conn.close()
+        return result
 
 
 def deleteDisk(diskID: int) -> ReturnValue:
-    return ReturnValue.OK
-
+    query = sql.SQL('DELETE FROM "Disk" where id = {id}').format(id=sql.Literal(diskID))
+    return delete(query=query, is_disk=True)
 
 def addRAM(ram: RAM) -> ReturnValue:
     return ReturnValue.OK
@@ -233,18 +242,24 @@ def addDiskAndPhoto(disk: Disk, photo: Photo) -> ReturnValue:
 # ************************************** BASIC API functions start **************************************
 
 def addPhotoToDisk(photo: Photo, diskID: int) -> ReturnValue:
-    # The photo with photo.ID is now saved on disk with diskID only if the photo's size is
-    # not larger than the free space on disk.
-    # Input: The photo that needs to be saved on disk with diskID.
-    # Output: ReturnValue with the following conditions:
-    # * OK in case of success.
-    # * NOT_EXISTS if photo/disk does not exist.
-    # * ALREADY_EXISTS if the photo is already saved on the disk.
-    # * BAD_PARAMS in case the photo's size is larger than the free space on the disk.
-    # * ERROR in case of a database error.
-    # Note: do not forget to adjust the free space on the disk.
-    return ReturnValue.OK
+    query = sql.SQL("""
+    INSERT INTO "PhotoInDisk" values ({photo_id},{disk_id});
+    UPDATE "Disk" set free_space = free_space - {photo_size} where id = {disk_id};
+    """).format(
+        photo_id=sql.Literal(photo.getPhotoID()),
+        photo_size=sql.Literal(photo.getSize()),
+        disk_id=sql.Literal(diskID))
+    return add(query)
 
+# clearTables()
+# createTables()
+# addPhoto(Photo(1, "Tree", 10))
+# addDisk(Disk(22, "DELL", 10, 20, 10))
+# addPhotoToDisk(Photo(1, "Tree", 10), 22)
+# breakpoint()
+# deleteDisk(22)
+# breakpoint()
+# clearTables()
 
 def removePhotoFromDisk(photo: Photo, diskID: int) -> ReturnValue:
     return ReturnValue.OK
