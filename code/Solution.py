@@ -35,7 +35,7 @@ def create_base_tables():
 
 
 def create_new_tables():
-    return create_photo_in_disk_table()
+    return create_photo_in_disk_table() + create_ram_in_disk_table()
 
 
 def create_photo_in_disk_table():
@@ -46,6 +46,19 @@ def create_photo_in_disk_table():
     			disk_id integer NOT NULL,
     			PRIMARY KEY (photo_id, disk_id),
     			FOREIGN KEY (photo_id) REFERENCES "Photo" (id) ON DELETE CASCADE,
+    			FOREIGN KEY (disk_id) REFERENCES "Disk" (id) ON DELETE CASCADE
+    		);
+    """
+
+
+def create_ram_in_disk_table():
+    return """
+        CREATE TABLE IF NOT EXISTS "RAMInDisk"
+    		(
+    			ram_id integer NOT NULL,
+    			disk_id integer NOT NULL,
+    			PRIMARY KEY (ram_id, disk_id),
+    			FOREIGN KEY (ram_id) REFERENCES "RAM" (id) ON DELETE CASCADE,
     			FOREIGN KEY (disk_id) REFERENCES "Disk" (id) ON DELETE CASCADE
     		);
     """
@@ -100,6 +113,7 @@ def delete(query):
 # ************************************** our auxiliary functions end **************************************
 
 # ************************************** Database functions start **************************************
+
 def createTables():
     base_tables = create_base_tables()
     new_tables = create_new_tables()
@@ -118,7 +132,7 @@ def createTables():
 
 def clearTables():
     base_tables = ["Photo", "Disk", "RAM"]
-    new_tables = ["PhotoInDisk"]
+    new_tables = ["PhotoInDisk", "RAMInDisk"]
     queries = ['DELETE FROM "{table}";'.format(table=table) for table in base_tables + new_tables]
     query = "\n".join(queries)
     conn = None
@@ -134,7 +148,7 @@ def clearTables():
 
 def dropTables():
     base_tables = ["Photo", "Disk", "RAM"]
-    new_tables = ["PhotoInDisk"]
+    new_tables = ["PhotoInDisk", "RAMInDisk"]
     queries = ['DROP TABLE IF EXISTS "{table}" CASCADE;'.format(table=table) for table in base_tables + new_tables]
     query = "\n".join(queries)
     conn = None
@@ -241,7 +255,6 @@ def getRAMByID(ramID: int) -> RAM:
         return result
 
 
-
 def deleteRAM(ramID: int) -> ReturnValue:
     query = sql.SQL(
         'DELETE FROM "RAM" where id = {id}').format(
@@ -262,17 +275,7 @@ def deleteRAM(ramID: int) -> ReturnValue:
 
     return ReturnValue.OK
 
-dropTables()
-clearTables()
-createTables()
-addRAM(RAM(1,"a", 2))
-addRAM(RAM(2, "a", 5))
-print(getRAMByID(1))
-deleteRAM(1)
-deleteRAM(2)
-print(getRAMByID(1))
-clearTables()
-dropTables()
+
 def addDiskAndPhoto(disk: Disk, photo: Photo) -> ReturnValue:
     return ReturnValue.OK
 
@@ -300,9 +303,28 @@ def removePhotoFromDisk(photo: Photo, diskID: int) -> ReturnValue:
 
 
 def addRAMToDisk(ramID: int, diskID: int) -> ReturnValue:
-    return ReturnValue.OK
+    query = sql.SQL("""INSERT INTO "RAMInDisk" VALUES ({ram_id},{disk_id} )""").format(
+        ram_id=sql.Literal(ramID),
+        disk_id=sql.Literal(diskID)
+    )
+    return add(query)
 
 
+# dropTables()
+clearTables()
+# createTables()
+addRAM(RAM(1, "a", 2))
+addRAM(RAM(2, "a", 5))
+# addRAM(RAM(3, "a", 5))
+addRAMToDisk(1, 1)
+
+
+# print(getRAMByID(1))
+# deleteRAM(1)
+# deleteRAM(2)
+# print(getRAMByID(1))
+# clearTables()
+# dropTables()
 def removeRAMFromDisk(ramID: int, diskID: int) -> ReturnValue:
     return ReturnValue.OK
 
