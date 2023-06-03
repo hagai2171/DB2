@@ -38,13 +38,13 @@ def create_new_tables():
 def create_photo_in_disk_table():
     return """
         CREATE TABLE IF NOT EXISTS "PhotoInDisk"
-    		(
-    			photo_id integer NOT NULL,
-    			disk_id integer NOT NULL,
-    			PRIMARY KEY (photo_id, disk_id),
-    			FOREIGN KEY (photo_id) REFERENCES "Photo" (id) ON DELETE CASCADE,
-    			FOREIGN KEY (disk_id) REFERENCES "Disk" (id) ON DELETE CASCADE
-    		);
+            (
+                photo_id integer NOT NULL,
+                disk_id integer NOT NULL,
+                PRIMARY KEY (photo_id, disk_id),
+                FOREIGN KEY (photo_id) REFERENCES "Photo" (id) ON DELETE CASCADE,
+                FOREIGN KEY (disk_id) REFERENCES "Disk" (id) ON DELETE CASCADE
+            );
     """
 
 def create_view_tables():
@@ -235,8 +235,20 @@ def deleteRAM(ramID: int) -> ReturnValue:
     return ReturnValue.OK
 
 def addDiskAndPhoto(disk: Disk, photo: Photo) -> ReturnValue:
-
-    return ReturnValue.OK
+    query = sql.SQL("""
+    INSERT INTO "Disk" VALUES ({disk_id}, {manufacturing_company}, {speed}, {free_space}, {cost_per_byte});
+    INSERT INTO "Photo" VALUES ({photo_id}, {description}, {disk_free_space_needed});
+    """).format(
+        disk_id=sql.Literal(disk.getDiskID()),
+        manufacturing_company=sql.Literal(disk.getCompany()),
+        speed=sql.Literal(disk.getSpeed()),
+        free_space=sql.Literal(disk.getFreeSpace()),
+        cost_per_byte=sql.Literal(disk.getCost()),
+        photo_id=sql.Literal(photo.getPhotoID()),
+        description=sql.Literal(photo.getDescription()),
+        disk_free_space_needed=sql.Literal(photo.getSize())
+    )
+    return add(query)
 # ************************************** CRUD API functions end **************************************
 
 # ************************************** BASIC API functions start **************************************
@@ -253,12 +265,12 @@ def addPhotoToDisk(photo: Photo, diskID: int) -> ReturnValue:
 
 # clearTables()
 # createTables()
+# print( addDiskAndPhoto(Disk(22, "DELL", 10, 20, 10), Photo(1, "Tree", 10)) )
 # addPhoto(Photo(1, "Tree", 10))
 # addDisk(Disk(22, "DELL", 10, 20, 10))
 # addPhotoToDisk(Photo(1, "Tree", 10), 22)
 # breakpoint()
 # deleteDisk(22)
-# breakpoint()
 # clearTables()
 
 def removePhotoFromDisk(photo: Photo, diskID: int) -> ReturnValue:
