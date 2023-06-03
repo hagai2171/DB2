@@ -196,9 +196,11 @@ def deletePhoto(photo: Photo) -> ReturnValue:
                 PhotoInDisk ON Photo_to_del.id == PhotoInDisk.photo_id);         
         DELETE FROM "Photo" where id = {id_to_del};
         """).format(
-        photo_size = sql.Literal(photo.getSize()),
+        photo_size=sql.Literal(photo.getSize()),
         id_to_del=sql.Literal(photo.getPhotoID()))
     return delete(query)
+
+
 # createTables()
 # addPhoto(Photo(1, "Tree", 10))
 # print(getPhotoByID(1).__str__())
@@ -272,6 +274,7 @@ def deleteRAM(ramID: int) -> ReturnValue:
 
     return ReturnValue.OK
 
+
 addRAM(RAM(1, 10, "Intel"))
 addPhoto(Photo(1, "Tree", 10))
 addPhoto(Photo(2, "Tree", 10))
@@ -279,6 +282,7 @@ print(getPhotoByID(1).__str__())
 print(getRAMByID(1).__str__())
 clearTables()
 dropTables()
+
 
 def addDiskAndPhoto(disk: Disk, photo: Photo) -> ReturnValue:
     return ReturnValue.OK
