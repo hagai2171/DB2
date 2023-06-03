@@ -201,19 +201,6 @@ def deletePhoto(photo: Photo) -> ReturnValue:
     return delete(query)
 
 
-# createTables()
-# addPhoto(Photo(1, "Tree", 10))
-# print(getPhotoByID(1).__str__())
-# clearTables()
-# dropTables()
-# createTables()
-# addPhoto(Photo(1, "Tree", 10))
-# clearTables()
-# dropTables()
-# addPhoto(Photo(1, "Tree", 10))
-# print(getPhotoByID(1).__str__())
-# deletePhoto(Photo(1, "Tree", 10))
-
 def addDisk(disk: Disk) -> ReturnValue:
     return ReturnValue.OK
 
@@ -227,8 +214,8 @@ def deleteDisk(diskID: int) -> ReturnValue:
 
 
 def addRAM(ram: RAM) -> ReturnValue:
-    query = sql.SQL('INSERT INTO "RAM" VALUES ({ram_id}, {size}, {company})').format(
-        ram_id=sql.Literal(ram.getRamID()),
+    query = sql.SQL('INSERT INTO "RAM" VALUES ({id}, {size}, {company})').format(
+        id=sql.Literal(ram.getRamID()),
         size=sql.Literal(ram.getSize()),
         company=sql.Literal(ram.getCompany())
     )
@@ -254,9 +241,10 @@ def getRAMByID(ramID: int) -> RAM:
         return result
 
 
+
 def deleteRAM(ramID: int) -> ReturnValue:
     query = sql.SQL(
-        'DELETE FROM "Ram" where id = {id}').format(
+        'DELETE FROM "RAM" where id = {id}').format(
         id=sql.Literal(ramID))
     conn = None
     try:
@@ -274,16 +262,17 @@ def deleteRAM(ramID: int) -> ReturnValue:
 
     return ReturnValue.OK
 
-
-addRAM(RAM(1, 10, "Intel"))
-addPhoto(Photo(1, "Tree", 10))
-addPhoto(Photo(2, "Tree", 10))
-print(getPhotoByID(1).__str__())
-print(getRAMByID(1).__str__())
+dropTables()
+clearTables()
+createTables()
+addRAM(RAM(1,"a", 2))
+addRAM(RAM(2, "a", 5))
+print(getRAMByID(1))
+deleteRAM(1)
+deleteRAM(2)
+print(getRAMByID(1))
 clearTables()
 dropTables()
-
-
 def addDiskAndPhoto(disk: Disk, photo: Photo) -> ReturnValue:
     return ReturnValue.OK
 
