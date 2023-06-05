@@ -66,12 +66,18 @@ def create_ram_in_disk_table():
 
 def create_view_tables():
     return """
-        CREATE VIEW "TotalRAMInDisk" as 
+        CREATE OR REPLACE VIEW "TotalRAMInDisk" as 
         select "Disk".id as disk_id,COALESCE(SUM("RAM".size), 0) as total_ram
         from "Disk"
         left outer join "RAMInDisk" on "Disk".id = "RAMInDisk".disk_id
         left outer join  "RAM" on "RAM".id = "RAMInDisk".ram_id
         GROUP BY "Disk".id;
+        
+        -- return (disk -> how many more single photos he can save) mapping and disk's speed
+        CREATE OR REPLACE VIEW "DiskPhotoCounts" AS 
+        SELECT "Disk".id AS disk_id, COUNT("Photo".id) AS photo_count, "Disk".speed AS disk_speed 
+        FROM "Disk" JOIN "Photo" ON  "Disk".free_space >= "Photo".disk_free_space_needed
+        GROUP BY "Disk".id;      
     """
 
 
@@ -159,7 +165,7 @@ def clearTables():
 def dropTables():
     base_tables = ["Photo", "Disk", "RAM"]
     new_tables = ["PhotoInDisk", "RAMInDisk"]
-    view_tables = ["TotalRAMInDisk"]
+    view_tables = ["TotalRAMInDisk", "DiskPhotoCounts"]
     queries = ['DROP TABLE IF EXISTS "{table}" CASCADE;'.format(table=table) for table in
                base_tables + new_tables + view_tables]
     query = "\n".join(queries)
@@ -319,31 +325,38 @@ def addDiskAndPhoto(disk: Disk, photo: Photo) -> ReturnValue:
 
 def addPhotoToDisk(photo: Photo, diskID: int) -> ReturnValue:
     query = sql.SQL("""
-    SELECT COUNT("Photo".id) FROM "Photo" WHERE
-    id = {photo_id} AND description = {photo_description} AND disk_free_space_needed = {photo_size};
+    BEGIN TRANSACTION;  
+    INSERT INTO "PhotoInDisk" VALUES ((SELECT COALESCE("Photo".id) FROM "Photo" WHERE
+    id = {photo_id} AND description = {photo_description} AND disk_free_space_needed = {photo_size}),
+    (SELECT COALESCE("Disk".id) FROM "Disk" WHERE "Disk".id = {disk_id}));
+    UPDATE "Disk" SET free_space = free_space - {photo_size} WHERE "Disk".id = {disk_id};
+    COMMIT;
     """).format(
         photo_id=sql.Literal(photo.getPhotoID()),
+        photo_description=sql.Literal(photo.getDescription()),
         photo_size=sql.Literal(photo.getSize()),
-        photo_description=sql.Literal(photo.getDescription())
-    )
+        disk_id=sql.Literal(diskID))
+    result = ReturnValue.OK
     conn = None
     try:
         conn = Connector.DBConnector()
-        _, results = conn.execute(query)
-        if results[0].get('count') == 0:
-            return ReturnValue.NOT_EXISTS
+        conn.execute(query)
+        conn.commit()
+    except DatabaseException.NOT_NULL_VIOLATION:
+        conn.rollback()
+        result = ReturnValue.NOT_EXISTS
+    except DatabaseException.UNIQUE_VIOLATION:
+        conn.rollback()
+        result = ReturnValue.ALREADY_EXISTS
+    except DatabaseException.CHECK_VIOLATION:
+        conn.rollback()
+        result = ReturnValue.BAD_PARAMS
     except Exception:
-        pass
+        conn.rollback()
+        result = ReturnValue.ERROR
     finally:
         conn.close()
-    query = sql.SQL("""
-    INSERT INTO "PhotoInDisk" VALUES ({photo_id},{disk_id});
-    UPDATE "Disk" SET free_space = free_space - {photo_size} WHERE id = {disk_id};
-    """).format(
-        photo_id=sql.Literal(photo.getPhotoID()),
-        photo_size=sql.Literal(photo.getSize()),
-        disk_id=sql.Literal(diskID))
-    return add(query)
+        return result
 
 def removePhotoFromDisk(photo: Photo, diskID: int) -> ReturnValue:
     query = sql.SQL("""
@@ -563,14 +576,71 @@ def getDisksContainingTheMostData() -> List[int]:
 # ************************************** ADVANCED API functions start **************************************
 
 def getConflictingDisks() -> List[int]:
-    return []
+    query = sql.SQL("""
+    SELECT DISTINCT p1.disk_id FROM "PhotoInDisk" AS p1 JOIN "PhotoInDisk" AS p2 ON p1.photo_id = p2.photo_id
+    WHERE p1.disk_id <> p2.disk_id ORDER BY p1.disk_id ASC;
+    """)
+    conn = None
+    disks_ids = []
+    try:
+        conn = Connector.DBConnector()
+        _, results = conn.execute(query)
+        for row in results.rows:
+            disks_ids.append(row[0])
+    except Exception as e:
+        pass
+    finally:
+        conn.close()
+    return disks_ids
 
 
 def mostAvailableDisks() -> List[int]:
-    return []
-
+    query = sql.SQL("""
+    SELECT disk_id FROM "DiskPhotoCounts"
+    ORDER BY photo_count DESC, disk_speed DESC, disk_id ASC LIMIT 5;         
+    """)
+    conn = None
+    disks_ids = []
+    try:
+        conn = Connector.DBConnector()
+        _, results = conn.execute(query)
+        for row in results.rows:
+            disks_ids.append(row[0])
+    except Exception as e:
+        pass
+    finally:
+        conn.close()
+    return disks_ids
 
 def getClosePhotos(photoID: int) -> List[int]:
-    return []
-
+    query = sql.SQL(""" 
+    -- return TRUE if photo not saved on any disk
+    CREATE OR REPLACE VIEW "PhotoNotSavedOnSomeDisk" AS
+    SELECT NOT EXISTS (SELECT * FROM "PhotoInDisk" WHERE "PhotoInDisk".photo_id = {photo_id});
+    
+    -- return all disks the photo is saved on or all disks from "PhotoInDisk"if photo not saved on any disk
+    CREATE OR REPLACE VIEW "DisksPhotoSavedOn" AS
+    SELECT "PhotoInDisk".disk_id FROM "PhotoInDisk" WHERE "PhotoInDisk".photo_id = {photo_id} 
+    OR (SELECT * FROM "PhotoNotSavedOnSomeDisk");  
+     
+    SELECT PID.photo_id FROM "PhotoInDisk" PID 
+    WHERE PID.disk_id IN (SELECT * FROM "DisksPhotoSavedOn") AND PID.photo_id <> {photo_id}
+    GROUP BY PID.photo_id
+    HAVING COUNT(PID.photo_id) >= (SELECT COUNT(*) FROM "DisksPhotoSavedOn")  * 0.5 OR (SELECT * FROM "PhotoNotSavedOnSomeDisk")
+    ORDER BY PID.photo_id ASC
+    LIMIT 10;
+    """).format(photo_id=sql.Literal(photoID))
+    conn = None
+    photos_ids = []
+    try:
+        conn = Connector.DBConnector()
+        breakpoint()
+        _, results = conn.execute(query)
+        for row in results.rows:
+            photos_ids.append(row[0])
+    except Exception as e:
+        pass
+    finally:
+        conn.close()
+    return photos_ids
 # ************************************** ADVANCED API functions end **************************************
