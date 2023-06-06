@@ -75,9 +75,13 @@ def create_view_tables():
         
         -- return (disk -> how many more single photos he can save) mapping and disk's speed
         CREATE OR REPLACE VIEW "DiskPhotoCounts" AS 
-        SELECT "Disk".id AS disk_id, COUNT("Photo".id) AS photo_count, "Disk".speed AS disk_speed 
-        FROM "Disk" JOIN "Photo" ON  "Disk".free_space >= "Photo".disk_free_space_needed
-        GROUP BY "Disk".id;      
+        SELECT 
+            "Disk".id AS disk_id, 
+            COALESCE(COUNT("Photo".id), 0) AS photo_count, 
+            "Disk".speed AS disk_speed 
+        FROM "Disk" 
+        LEFT JOIN "Photo" ON "Disk".free_space >= "Photo".disk_free_space_needed
+        GROUP BY "Disk".id, "Disk".speed;     
     """
 
 
@@ -107,7 +111,7 @@ def add(query) -> ReturnValue:
 
 
 # generically delete tuple from table
-def delete(query, is_disk=False):
+def delete(query, is_ram_or_disk=False):
     result = ReturnValue.OK
     conn = None
     try:
@@ -116,7 +120,7 @@ def delete(query, is_disk=False):
         if row_effected != 0:
             conn.commit()
         else:
-            if is_disk:
+            if is_ram_or_disk:
                 result = ReturnValue.NOT_EXISTS
     except Exception as e:
         conn.rollback()
@@ -178,14 +182,10 @@ def dropTables():
         conn.rollback()
     finally:
         conn.close()
-
-
 # ************************************** Database functions end **************************************
 
 # ************************************** CRUD API functions start **************************************
-# Python's equivalent to NULL is None.
-# You can assume the arguments to the function will not be None, the inner attributes of the
-# argument might consist of None
+
 def addPhoto(photo: Photo) -> ReturnValue:
     query = sql.SQL('INSERT INTO "Photo" VALUES ({photo_id}, {description}, {disk_free_space_needed})').format(
         photo_id=sql.Literal(photo.getPhotoID()),
@@ -216,22 +216,24 @@ def getPhotoByID(photoID: int) -> Photo:
 
 def deletePhoto(photo: Photo) -> ReturnValue:
     query = sql.SQL(
-        """"
-        UPDATE "Disk" SET free_space = free_space + {size} WHERE id IN
-            (SELECT "PhotoInDisk".Disk_id FROM 
-                "PhotoInDisk" INNER JOIN "Photo" ON "Photo".id = "PhotoInDisk".photo_id 
-                WHERE ("Photo".id, "Photo".description, "Photo".size) = ({id}, {description}, {size});        
-        DELETE FROM "Photo" WHERE (id, description, size) = ({id}, {description}, {size});
+        """
+        UPDATE "Disk" SET free_space = free_space + {disk_free_space_needed} WHERE id IN
+            (SELECT "PhotoInDisk".Disk_id FROM "PhotoInDisk" INNER JOIN "Photo" ON "Photo".id = "PhotoInDisk".photo_id  
+                WHERE ("Photo".id, "Photo".description, "Photo".disk_free_space_needed) =
+                                                                ({id}, {description}, {disk_free_space_needed}));          
+        DELETE FROM "Photo" WHERE (id, description, disk_free_space_needed) =
+                                                    ({id}, {description}, {disk_free_space_needed});
         """).format(
         id=sql.Literal(photo.getPhotoID()),
         description=sql.Literal(photo.getDescription()),
-        size=sql.Literal(photo.getSize()))
+        disk_free_space_needed=sql.Literal(photo.getSize()))
     return delete(query)
 
 
 def addDisk(disk: Disk) -> ReturnValue:
-    query = sql.SQL(
-        'INSERT INTO "Disk" VALUES ({disk_id}, {manufacturing_company}, {speed}, {free_space}, {cost_per_byte});').format(
+    query = sql.SQL("""
+        INSERT INTO "Disk" (id, manufacturing_company, speed, free_space, cost_per_byte) 
+        VALUES ({disk_id}, {manufacturing_company}, {speed}, {free_space}, {cost_per_byte});""").format(
         disk_id=sql.Literal(disk.getDiskID()),
         manufacturing_company=sql.Literal(disk.getCompany()),
         speed=sql.Literal(disk.getSpeed()),
@@ -264,7 +266,7 @@ def getDiskByID(diskID: int) -> Disk:
 
 def deleteDisk(diskID: int) -> ReturnValue:
     query = sql.SQL('DELETE FROM "Disk" where id = {id}').format(id=sql.Literal(diskID))
-    return delete(query=query, is_disk=True)
+    return delete(query=query, is_ram_or_disk=True)
 
 
 def addRAM(ram: RAM) -> ReturnValue:
@@ -299,13 +301,15 @@ def deleteRAM(ramID: int) -> ReturnValue:
     query = sql.SQL(
         'DELETE FROM "RAM" where id = {id}').format(
         id=sql.Literal(ramID))
-    return delete(query=query, is_disk=False)
+    return delete(query=query, is_ram_or_disk=True)
 
 
 def addDiskAndPhoto(disk: Disk, photo: Photo) -> ReturnValue:
     query = sql.SQL("""
+        BEGIN TRANSACTION;
         INSERT INTO "Disk" VALUES ({disk_id}, {manufacturing_company}, {speed}, {free_space}, {cost_per_byte});
         INSERT INTO "Photo" VALUES ({photo_id}, {description}, {disk_free_space_needed});
+        COMMIT;
         """).format(
         disk_id=sql.Literal(disk.getDiskID()),
         manufacturing_company=sql.Literal(disk.getCompany()),
@@ -358,19 +362,25 @@ def addPhotoToDisk(photo: Photo, diskID: int) -> ReturnValue:
         conn.close()
         return result
 
+
 def removePhotoFromDisk(photo: Photo, diskID: int) -> ReturnValue:
     query = sql.SQL("""
-        UPDATE "Disk" set free_space=free_space+(
-            select "Photo".disk_free_space_needed
-            from "Photo"
-            inner join  "PhotoInDisk" on "PhotoInDisk".disk_id = {diskID} and "Photo".id = "PhotoInDisk".photo_id and "Photo".id= {photoID}
-            ) where id = {diskID};
+        CREATE OR REPLACE VIEW "PhotoSize" AS
+        SELECT COALESCE(
+        (
+            SELECT "Photo".disk_free_space_needed
+            FROM "Photo"
+            INNER JOIN "PhotoInDisk"
+            ON "PhotoInDisk".disk_id = {diskID} AND "Photo".id = "PhotoInDisk".photo_id AND "Photo".id = {photoID}
+        ), 0);
+        
+        UPDATE "Disk" set free_space=free_space + (SELECT * FROM "PhotoSize") where id = {diskID};
         DELETE FROM "PhotoInDisk" where Photo_id = {photoID} and disk_id = {diskID};
         """).format(
         photoID=sql.Literal(photo.getPhotoID()),
         PhotoSize=sql.Literal(photo.getSize()),
         diskID=sql.Literal(diskID))
-    return delete(query=query, is_disk=False)
+    return delete(query=query)
 
 
 def addRAMToDisk(ramID: int, diskID: int) -> ReturnValue:
@@ -387,28 +397,25 @@ def removeRAMFromDisk(ramID: int, diskID: int) -> ReturnValue:
         """).format(
         ramID=sql.Literal(ramID),
         diskID=sql.Literal(diskID))
-    return delete(query=query, is_disk=False)
+    return delete(query=query, is_ram_or_disk=True)
 
 
 def averagePhotosSizeOnDisk(diskID: int) -> float:
-    avg_size = 0
     query = sql.SQL("""
-           select AVG("Photo".disk_free_space_needed)
-           from "Photo"
-           inner join "PhotoInDisk" on "PhotoInDisk".disk_id = {diskID} and "Photo".id = "PhotoInDisk".photo_id
-           """).format(
-        diskID=sql.Literal(diskID))
+    SELECT COALESCE(       
+    (SELECT AVG("Photo".disk_free_space_needed)
+    FROM "Photo" INNER JOIN "PhotoInDisk" ON "PhotoInDisk".disk_id = {diskID} AND "Photo".id = "PhotoInDisk".photo_id)
+    , 0);
+   """).format(diskID=sql.Literal(diskID))
     conn = None
+    avg_size = 0
     try:
         conn = Connector.DBConnector()
         row_effected, entries = conn.execute(query)
         if row_effected != 0:
             avg_size = entries.rows[0][0]
-    except DatabaseException.ConnectionInvalid as e:
-        return -1
     except Exception as e:
-        print(e)
-        return -1
+        avg_size = -1
     finally:
         conn.close()
     return avg_size
@@ -439,36 +446,35 @@ def getTotalRamOnDisk(diskID: int) -> int:
 
 
 def getCostForDescription(description: str) -> int:
-    cost = 0
     query = sql.SQL("""
-        select sum("Disk".cost_per_byte * "Photo".disk_free_space_needed)
+        SELECT COALESCE(
+        (select sum("Disk".cost_per_byte * "Photo".disk_free_space_needed)
         from "Disk"
         inner join "PhotoInDisk" on "PhotoInDisk".disk_id = "Disk".id
-        inner join "Photo" on "Photo".id = "PhotoInDisk".photo_id and "Photo".description = {description}
+        inner join "Photo" on "Photo".id = "PhotoInDisk".photo_id and "Photo".description = {description})
+        , 0)
         """).format(
         description=sql.Literal(description))
     conn = None
+    cost = 0
     try:
         conn = Connector.DBConnector()
         row_effected, entries = conn.execute(query)
         if row_effected != 0:
             cost = entries.rows[0][0]
-    except DatabaseException.ConnectionInvalid as e:
-        return -1
     except Exception as e:
-        print(e)
-        return -1
+        cost = -1
     finally:
         conn.close()
     return cost
 
 def getPhotosCanBeAddedToDisk(diskID: int) -> List[int]:
-    photos_ids = []
     query = sql.SQL("""
      SELECT "Photo".id FROM "Disk" INNER JOIN "Photo" ON "Photo".disk_free_space_needed <= "Disk".free_space 
      where "Disk".id = {disk_id} ORDER BY "Photo".id DESC LIMIT 5
     """).format(disk_id=sql.Literal(diskID))
     conn = None
+    photos_ids = []
     try:
         conn = Connector.DBConnector()
         row_effected, entries = conn.execute(query)
@@ -480,16 +486,19 @@ def getPhotosCanBeAddedToDisk(diskID: int) -> List[int]:
         conn.close()
     return photos_ids
 
+
 def getPhotosCanBeAddedToDiskAndRAM(diskID: int) -> List[int]:
-    photos_ids = []
     query = sql.SQL("""
-     SELECT "Photo".id FROM "Disk" LEFT OUTER JOIN "TotalRAMInDisk" ON "TotalRAMInDisk".disk_id="Disk".id
-     LEFT OUTER JOIN "Photo" ON "Photo".disk_free_space_needed <= "Disk".free_space 
-     AND "Photo".disk_free_space_needed <= "TotalRAMInDisk".total_ram
-     WHERE "Disk".id = {disk_id} ORDER BY "Photo".id ASC LIMIT 5
-    """).format(
-        disk_id=sql.Literal(diskID))
+    SELECT "Photo".id FROM "Disk" 
+    LEFT OUTER JOIN "TotalRAMInDisk" ON "TotalRAMInDisk".disk_id="Disk".id
+    LEFT OUTER JOIN "Photo" ON "Photo".disk_free_space_needed <= "Disk".free_space 
+    AND "Photo".disk_free_space_needed <= "TotalRAMInDisk".total_ram
+    WHERE "Disk".id = {disk_id} AND "Photo".id IS NOT NULL
+    ORDER BY "Photo".id ASC 
+    LIMIT 5;
+    """).format(disk_id=sql.Literal(diskID))
     conn = None
+    photos_ids = []
     try:
         conn = Connector.DBConnector()
         row_effected, entries = conn.execute(query)
@@ -504,8 +513,10 @@ def getPhotosCanBeAddedToDiskAndRAM(diskID: int) -> List[int]:
 def isCompanyExclusive(diskID: int) -> bool:
     is_exclusive = False
     query = sql.SQL("""
-    SELECT COUNT(DISTINCT "RAM".company) = 1 
-    AND MIN("Disk".manufacturing_company) = MIN("RAM".company) AS is_exclusive
+    SELECT (COUNT(DISTINCT "RAM".company) = 1 
+    AND MIN("Disk".manufacturing_company) = MIN("RAM".company)) 
+    OR (COUNT(DISTINCT "RAM".company) = 0 AND EXISTS(SELECT "Disk".id FROM "Disk" WHERE "Disk".id = {disk_id})) 
+    AS is_exclusive
     FROM "Disk"
     LEFT JOIN "RAMInDisk" ON "Disk".id = "RAMInDisk".disk_id
     LEFT JOIN "RAM" ON "RAMInDisk".ram_id = "RAM".id
@@ -521,6 +532,7 @@ def isCompanyExclusive(diskID: int) -> bool:
     finally:
         conn.close()
     return is_exclusive
+
 
 def isDiskContainingAtLeastNumExists(description: str, num: int) -> bool:
     result = False
@@ -550,7 +562,7 @@ def isDiskContainingAtLeastNumExists(description: str, num: int) -> bool:
 
 def getDisksContainingTheMostData() -> List[int]:
     query = sql.SQL("""
-    SELECT "Disk".id
+    SELECT DISTINCT "Disk".id
     FROM "Disk"
     JOIN "PhotoInDisk" ON "Disk".id = "PhotoInDisk".disk_id
     JOIN "Photo" ON "PhotoInDisk".photo_id = "Photo".id
@@ -596,8 +608,10 @@ def getConflictingDisks() -> List[int]:
 
 def mostAvailableDisks() -> List[int]:
     query = sql.SQL("""
-    SELECT disk_id FROM "DiskPhotoCounts"
-    ORDER BY photo_count DESC, disk_speed DESC, disk_id ASC LIMIT 5;         
+    SELECT disk_id 
+    FROM "DiskPhotoCounts"
+    ORDER BY photo_count DESC, disk_speed DESC, disk_id ASC 
+    LIMIT 5;
     """)
     conn = None
     disks_ids = []
@@ -612,29 +626,34 @@ def mostAvailableDisks() -> List[int]:
         conn.close()
     return disks_ids
 
+
 def getClosePhotos(photoID: int) -> List[int]:
     query = sql.SQL(""" 
     -- return TRUE if photo not saved on any disk
     CREATE OR REPLACE VIEW "PhotoNotSavedOnSomeDisk" AS
     SELECT NOT EXISTS (SELECT * FROM "PhotoInDisk" WHERE "PhotoInDisk".photo_id = {photo_id});
     
-    -- return all disks the photo is saved on or all disks from "PhotoInDisk"if photo not saved on any disk
+    -- return all disks the photo is saved on 
     CREATE OR REPLACE VIEW "DisksPhotoSavedOn" AS
-    SELECT "PhotoInDisk".disk_id FROM "PhotoInDisk" WHERE "PhotoInDisk".photo_id = {photo_id} 
-    OR (SELECT * FROM "PhotoNotSavedOnSomeDisk");  
+    SELECT "PhotoInDisk".disk_id FROM "PhotoInDisk" WHERE "PhotoInDisk".photo_id = {photo_id}; 
      
-    SELECT PID.photo_id FROM "PhotoInDisk" PID 
+    (SELECT DISTINCT PID.photo_id FROM "PhotoInDisk" PID 
     WHERE PID.disk_id IN (SELECT * FROM "DisksPhotoSavedOn") AND PID.photo_id <> {photo_id}
     GROUP BY PID.photo_id
-    HAVING COUNT(PID.photo_id) >= (SELECT COUNT(*) FROM "DisksPhotoSavedOn")  * 0.5 OR (SELECT * FROM "PhotoNotSavedOnSomeDisk")
+    HAVING COUNT(PID.photo_id) >= (SELECT COUNT(*) FROM "DisksPhotoSavedOn")  * 0.5 
     ORDER BY PID.photo_id ASC
-    LIMIT 10;
+    LIMIT 10)
+    
+    UNION ALL
+    
+    (SELECT "Photo".id FROM "Photo" WHERE (SELECT * FROM "PhotoNotSavedOnSomeDisk") AND "Photo".id <> {photo_id}
+    ORDER BY "Photo".id ASC LIMIT 10);
+
     """).format(photo_id=sql.Literal(photoID))
     conn = None
     photos_ids = []
     try:
         conn = Connector.DBConnector()
-        breakpoint()
         _, results = conn.execute(query)
         for row in results.rows:
             photos_ids.append(row[0])
